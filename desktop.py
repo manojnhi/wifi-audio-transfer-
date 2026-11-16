@@ -16,6 +16,7 @@ class SoundTransferDesktop:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.process: subprocess.Popen | None = None
+        self.log_path: Path | None = None
         self.root.title("Sound Transfer WiFi")
         self.root.geometry("520x380")
         self.root.minsize(440, 340)
@@ -59,10 +60,15 @@ class SoundTransferDesktop:
             command = [sys.executable, str(Path(__file__).resolve()), "--server"]
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
+            log_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Sound Transfer WiFi"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.log_path = log_dir / "server.log"
+            log_file = self.log_path.open("ab", buffering=0)
             self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             stdout=log_file, stderr=subprocess.STDOUT,
                                              creationflags=creationflags,
                                              close_fds=(os.name != "nt"))
+            log_file.close()
         except OSError as exc:
             messagebox.showerror("Could not start server", str(exc), parent=self.root)
             return
@@ -76,7 +82,8 @@ class SoundTransferDesktop:
         if self.process and self.process.poll() is not None:
             self.process = None
             self.address.set("")
-            self.status.config(text="Server stopped unexpectedly. Check Python and audio device setup.", fg="#ff7979")
+            log_hint = f" Details: {self.log_path}" if self.log_path else ""
+            self.status.config(text="Server stopped. Check the log file." + log_hint, fg="#ff7979", wraplength=440)
             self.start_button.config(text="Start computer server", command=self.start, bg="#41d6a4")
             self.copy_button.config(state="disabled")
             return
