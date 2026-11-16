@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10151c">
+  <title>Sound Transfer WiFi</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10151c; color: #f4f7fb; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 24px; }
+    main { width: min(100%, 420px); padding: 30px; border: 1px solid #2b3644; border-radius: 24px; background: #18212b; box-shadow: 0 20px 70px #0005; }
+    .mark { width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; background: #1d705e; font-size: 27px; }
+    h1 { margin: 20px 0 8px; font-size: 27px; letter-spacing: -.6px; }
+    p { color: #aebdca; line-height: 1.55; }
+    button { width: 100%; min-height: 52px; margin-top: 14px; border: 0; border-radius: 13px; background: #41d6a4; color: #071b15; font: inherit; font-weight: 750; cursor: pointer; }
+    button:disabled { opacity: .65; cursor: default; }
+    #status { min-height: 48px; margin: 19px 0 0; padding: 12px 14px; border-radius: 12px; background: #101820; color: #b9c9d6; font-size: 14px; }
+    #status::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: #748391; }
+    #status[data-state="connected"]::before { background: #41d6a4; }
+    #status[data-state="error"]::before { background: #ff7979; }
+    .hint { margin-top: 20px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark" aria-hidden="true">♫</div>
+    <h1>Sound Transfer WiFi</h1>
+    <p>Listen to your computer's sound on this phone over your local Wi-Fi.</p>
+    <button id="toggle">Start listening</button>
+    <p id="status" role="status" aria-live="polite" data-state="idle">Ready to connect to your computer.</p>
+    <p class="hint">Keep this page open and your phone awake while listening.</p>
+  </main>
+  <script>
+    const button = document.querySelector('#toggle');
+    const status = document.querySelector('#status');
+    let context, socket, nextTime = 0, active = false;
+
+    function setStatus(message, state = 'idle') {
+      status.textContent = message;
+      status.dataset.state = state;
+    }
+
+    function stop(message = 'Disconnected.') {
+      active = false;
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+      socket = null;
+      if (context) context.close();
+      context = null;
+      button.textContent = 'Start listening';
+      button.disabled = false;
+      setStatus(message);
+    }
+
+    button.addEventListener('click', async () => {
+      if (active) { stop(); return; }
+      active = true;
+      button.disabled = true;
+      setStatus('Connecting to your computer…');
+      try {
+        context = new AudioContext({ sampleRate: 44100 });
+        await context.resume();
+        socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/stream`);
+        socket.binaryType = 'arraybuffer';
+        socket.onopen = () => {
+          if (!active) return;
+          button.disabled = false;
+          button.textContent = 'Stop listening';
+          setStatus('Connected. Computer audio is playing.', 'connected');
+          nextTime = context.currentTime + 0.08;
+        };
+        socket.onmessage = event => {
+          if (!active || !context || typeof event.data === 'string') return;
+          const pcm = new Float32Array(event.data);
+          const buffer = context.createBuffer(1, pcm.length, 44100);
+          buffer.copyToChannel(pcm, 0);
+          const source = context.createBufferSource();
+          source.buffer = buffer;
+          source.connect(context.destination);
+          const now = context.currentTime;
+          if (nextTime < now) nextTime = now + 0.04;
+          source.start(nextTime);
+          nextTime += buffer.duration;
+        };
+        socket.onerror = () => {
+          if (active) stop('Could not connect. Check that the computer server is running and both devices use the same Wi-Fi.');
+        };
+        socket.onclose = () => {
+          if (active) stop('Connection closed. Check the computer server and try again.');
+        };
+      } catch (error) {
+        stop(`Audio could not start: ${error.message}`);
+      }
+    });
+  </script>
+</body>
+</html>
